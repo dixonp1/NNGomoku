@@ -16,7 +16,7 @@ public class NeuralNet {
 	private double[] outputBiases;
 	
 	private double lambda = 0.8;
-	private double alpha = 0.005;
+	private double eta = 0.005;
 	private double gamma = 0.09;
 	
 	public NeuralNet(int inputN, int lHiddenN, int rHiddenN, int outputN){
@@ -207,7 +207,7 @@ public class NeuralNet {
 		for(int d=numStates-2; d>=0; d--){
 			for(int r=0; r<outputNeurons; r++){
 				reward[r] = gamma * reward[r];
-				dvalues[d][r] = lambda * dvalues[d+1][r] + alpha * ((1 - lambda) 
+				dvalues[d][r] = lambda * dvalues[d+1][r] + eta * ((1 - lambda) 
 						* (reward[r] + gamma * gsOutputs[d+1][r] - gsOutputs[d][r]));
 				error[d][r] = dvalues[d][r] - gsOutputs[d][r];
 				
@@ -218,89 +218,92 @@ public class NeuralNet {
 		//System.out.println("Error first move: " + 0.5 * (error[numStates-2][0] * error[numStates-2][0]));
 		System.out.println("Error last move: " + 0.5 * totalError);
 
-		double[][] owDeltas 	= new double[rightHiddenNeurons][outputNeurons];
-		double[][] rhwDeltas 	= new double[leftHiddenNeurons][rightHiddenNeurons];
-		double[][] lhwDeltas 	= new double[inputNeurons][leftHiddenNeurons];
-		double[] rhbDeltas		= new double[rightHiddenNeurons];
-		double[] lhbDeltas		= new double[leftHiddenNeurons];
-		double[] obDeltas 		= new double[outputNeurons];
-		//calculate deltas at each time step
+		double[][] owGrads 	= new double[rightHiddenNeurons][outputNeurons];
+		double[][] rhwGrads 	= new double[leftHiddenNeurons][rightHiddenNeurons];
+		double[][] lhwGrads 	= new double[inputNeurons][leftHiddenNeurons];
+		double[] rhbGrads		= new double[rightHiddenNeurons];
+		double[] lhbGrads		= new double[leftHiddenNeurons];
+		double[] obGrads 		= new double[outputNeurons];
+		//calculate grads at each time step
 		for(int i=0; i<numStates; i++){
 			
-			//calculate deltas for weights from  second hidden to output
+			//calculate grads for weights from  second hidden to output
 			for(int j=0; j<outputNeurons; j++){
-				//calc delta hidden bias
-				obDeltas[j] += alpha * (error[i][j] * sigPrime(gsOutputs[i][j]));
+				//calc grad hidden bias
+				obGrads[j] += error[i][j] * sigPrime(gsOutputs[i][j]);
 				
 				for(int k=0; k<rightHiddenNeurons; k++){
-					//calc delta for hidden to output weights
-					owDeltas[k][j] += alpha * error[i][j] * sigPrime(gsOutputs[i][j]) * gsRightHiddenAct[i][k];
+					//calc grad for hidden to output weights
+					owGrads[k][j] += error[i][j] * sigPrime(gsOutputs[i][j]) 
+							* gsRightHiddenAct[i][k];
 				}						
 			}
 			
 			double[][] rhwd = new double[leftHiddenNeurons][rightHiddenNeurons];
-			//calculate deltas for weights from first hidden to second
+			//calculate grads for weights from first hidden to second
 			for(int j=0; j<rightHiddenNeurons; j++){
-				double gradient = 0;
+				double delta = 0;
 				for(int g=0; g<outputNeurons; g++){
-					gradient += outputWeights[j][g] * (error[i][g] * sigPrime(gsOutputs[i][g]));
+					delta += outputWeights[j][g] * (error[i][g] * sigPrime(gsOutputs[i][g]));
 				}
-				//calc deltas bias weights
-				rhbDeltas[j] += alpha * gradient;
+				//calc grads bias weights
+				rhbGrads[j] += delta * sigPrime(gsRightHiddenAct[i][j]);
 				
-				//calc delta for weights
+				//calc grad for weights
 				for(int k=0; k<leftHiddenNeurons; k++){
-					double delta = alpha * (gradient * sigPrime(gsRightHiddenAct[i][j]) * gsLeftHiddenAct[i][k]);
-					rhwDeltas[k][j] += delta;
-					rhwd[k][j] = delta;
+					double grad = delta * sigPrime(gsRightHiddenAct[i][j]) 
+							* gsLeftHiddenAct[i][k];
+					rhwGrads[k][j] += grad;
+					rhwd[k][j] = grad;
 				}
 			}
 			
-			//calc deltas for weights from input to first hidden
+			//calc grads for weights from input to first hidden
 			for(int j=0; j<leftHiddenNeurons; j++){
-				double gradient = 0;
+				double delta = 0;
 				for(int g=0; g<rightHiddenNeurons; g++){
-					gradient += rightHiddenWeights[j][g] * rhwd[j][g] ;
+					delta += rightHiddenWeights[j][g] * rhwd[j][g] ;
 				}
 				
-				//calc deltas bias weights
-				lhbDeltas[j] += alpha * gradient;
+				//calc grads bias weights
+				lhbGrads[j] += delta * sigPrime(gsLeftHiddenAct[i][j]);
 				
-				//calc delta for hidden to input weights
+				//calc grad for hidden to input weights
 				for(int k=0; k<inputNeurons; k++){
-					lhwDeltas[k][j] += alpha * (gradient * sigPrime(gsLeftHiddenAct[i][j]) * gameStates[i][k]);
+					lhwGrads[k][j] += delta * sigPrime(gsLeftHiddenAct[i][j]) 
+							* gameStates[i][k];
 				}
 			}	
 		}
 		//calculate new weights for hidden to output
 		for(int j=0; j<outputNeurons; j++){
 			//calc new hidden bias weights
-			 outputBiases[j] += obDeltas[j];
+			 outputBiases[j] += (eta/numStates) * obGrads[j];
 			
 			for(int k=0; k<rightHiddenNeurons; k++){
 				//calc new hidden to output weights
-				 outputWeights[k][j] += owDeltas[k][j];
+				 outputWeights[k][j] += (eta/numStates) * owGrads[k][j];
 			}						
 		}
 		
 		//calculate new weights for first hidden to second
 		for(int j=0; j<rightHiddenNeurons; j++){
 			//calc new bias weights
-			 rightHiddenBiases[j] += rhbDeltas[j];
+			 rightHiddenBiases[j] += (eta/numStates) * rhbGrads[j];
 			
 			//calc discount for input neurons
 			for(int k=0; k<leftHiddenNeurons; k++){
-				 rightHiddenWeights[k][j]+= rhwDeltas[k][j];
+				 rightHiddenWeights[k][j]+= (eta/numStates) * rhwGrads[k][j];
 			}
 		}	
 		//calc new wieghts for input to first hidden
 		for(int j=0; j<leftHiddenNeurons; j++){
 			//calc new bias weights
-			 leftHiddenBiases[j] += lhbDeltas[j];
+			 leftHiddenBiases[j] += (eta/numStates) * lhbGrads[j];
 			
 			//calc discount for input neurons
 			for(int k=0; k<inputNeurons; k++){
-				 leftHiddenWeights[k][j]+= lhwDeltas[k][j];
+				 leftHiddenWeights[k][j]+= (eta/numStates) * lhwGrads[k][j];
 			}
 		}	
 	}
