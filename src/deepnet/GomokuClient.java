@@ -1,3 +1,5 @@
+package deepnet;
+
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.FileReader;
@@ -21,11 +23,13 @@ public class GomokuClient {
 	private Board board;
 	private char me;
 	
-	//net configuration
+	//network structure
 	private NeuralNet net;
 	private int outputNeurons = 1;
-	private int hiddenNeurons = 80;
-	private int inputNeurons = 82; //81 positions + 1 for which player is to move
+	private int leftHiddenNeurons = 50;
+	private int rightHiddenNeurons = 30;
+	private int inputNeurons = 82;
+	
 	private ArrayList<Double[]> gameStates;
 
 	public static void main(String args[]) throws IOException {
@@ -68,11 +72,10 @@ public class GomokuClient {
 
 	public GomokuClient(){
 		gs = "";// Set up-setting to an empty string.
-		net = new NeuralNet(inputNeurons, hiddenNeurons, outputNeurons);
+		net = new NeuralNet(inputNeurons, leftHiddenNeurons, rightHiddenNeurons, outputNeurons);
 		board = new Board(inputNeurons);
 	}
 	
-	//gracefully close connection
 	private void closeConnection(){
 		try {
 			os.close();
@@ -105,7 +108,7 @@ public class GomokuClient {
 					double[] cboard = board.getBoard();
 					System.arraycopy(cboard, 0, tempboard, 0, tempboard.length);
 					tempboard[move] = 1;
-					cboard[inputNeurons - 1] = 1;
+					tempboard[inputNeurons - 1] = -1;
 					addGS(cboard);
 					addGS(tempboard);	
 				}
@@ -133,13 +136,10 @@ public class GomokuClient {
 		}
 	}
 
-	//read in board state and gamestate
 	public Board readIn() throws Exception {
 		String s;
 		double[] gb = new double[inputNeurons];
 		Board b = new Board(inputNeurons);
-		//read each line and add pos to board
-		//1 for me, 0 for empty, -1 for opponent
 		int i, j;
 		gs = is.readLine();
 		for (i = 0; i < 9; i++) {
@@ -154,7 +154,7 @@ public class GomokuClient {
 				}
 			}
 		}
-		gb[inputNeurons - 1] = 1; //set as my turn to make move
+		gb[inputNeurons - 1] = 1;
 
 		me = is.readLine().charAt(0);
 		b.setBoard(gb);
@@ -212,12 +212,13 @@ public class GomokuClient {
 		return temp;
 	}
 	
-	//loads weights from text file
 	private int loadWeights(){
 		String file = "weights.txt";
-		double[][] hiddenWeights = new double[inputNeurons][hiddenNeurons];
-		double[] hiddenBiases = new double[hiddenNeurons];
-		double[][] outputWeights = new double[hiddenNeurons][outputNeurons];
+		double[][] leftHiddenWeights = new double[inputNeurons][leftHiddenNeurons];
+		double[][] rightHiddenWeights = new double[leftHiddenNeurons][rightHiddenNeurons];
+		double[] leftHiddenBiases = new double[leftHiddenNeurons];
+		double[] rightHiddenBiases = new double[rightHiddenNeurons];
+		double[][] outputWeights = new double[rightHiddenNeurons][outputNeurons];
 		double[] outputBiases = new double[outputNeurons];
 		
 		//read in weights from file
@@ -227,8 +228,8 @@ public class GomokuClient {
 			//read in hidden weights
 			for(int i=0; i<inputNeurons; i++){
 				line = br.readLine().split(" ");
-				for(int j=0; j<hiddenNeurons; j++){
-					hiddenWeights[i][j] = Double.parseDouble(line[j]);
+				for(int j=0; j<leftHiddenNeurons; j++){
+					leftHiddenWeights[i][j] = Double.parseDouble(line[j]);
 				}
 			}
 			//skip line
@@ -236,14 +237,31 @@ public class GomokuClient {
 
 			//read in hidden biases
 			line = br.readLine().split(" ");
-			for(int i=0; i<hiddenNeurons; i++){
-				hiddenBiases[i] = Double.parseDouble(line[i]);
+			for(int i=0; i<leftHiddenNeurons; i++){
+				leftHiddenBiases[i] = Double.parseDouble(line[i]);
+			}
+			//skip line
+			line = br.readLine().split(" ");
+			
+			for(int i=0; i<leftHiddenNeurons; i++){
+				line = br.readLine().split(" ");
+				for(int j=0; j<rightHiddenNeurons; j++){
+					rightHiddenWeights[i][j] = Double.parseDouble(line[j]);
+				}
+			}
+			//skip line
+			line = br.readLine().split(" ");
+
+			//read in hidden biases
+			line = br.readLine().split(" ");
+			for(int i=0; i<rightHiddenNeurons; i++){
+				rightHiddenBiases[i] = Double.parseDouble(line[i]);
 			}
 			//skip line
 			line = br.readLine().split(" ");
 			
 			//read in output weights
-			for(int i=0; i<hiddenNeurons; i++){
+			for(int i=0; i<rightHiddenNeurons; i++){
 				line = br.readLine().split(" ");
 				outputWeights[i][0] = Double.parseDouble(line[0]);
 			}
@@ -254,7 +272,8 @@ public class GomokuClient {
 			line = br.readLine().split(" ");
 			outputBiases[0] = Double.parseDouble(line[0]);
 			
-			net.setWeights(hiddenWeights, outputWeights, hiddenBiases, outputBiases);
+			net.setWeights(leftHiddenWeights, rightHiddenWeights, outputWeights, 
+					leftHiddenBiases, rightHiddenBiases, outputBiases);
 			
 			//read number of games trained on
 			br.readLine();
@@ -267,11 +286,12 @@ public class GomokuClient {
 		return 0;
 	}
 	
-	//save weights to text file (used during training)
 	private void saveWeights(int numGames){
 		String file = "weights.txt";
-		double[][] hw = net.getHW();
-		double[] hb = net.getHB();
+		double[][] lhw = net.getLHW();
+		double[][] rhw = net.getRHW();
+		double[] lhb = net.getLHB();
+		double[] rhb = net.getRHB();
 		double[][] ow = net.getOW();
 		double[] ob = net.getOB();
 		
@@ -280,8 +300,8 @@ public class GomokuClient {
 			//write hidden weights
 			for(int i=0; i<inputNeurons; i++){
 				line = "";
-				for(int j=0; j<hiddenNeurons; j++){
-					line = line + String.valueOf(hw[i][j]) + " ";
+				for(int j=0; j<leftHiddenNeurons; j++){
+					line = line + String.valueOf(lhw[i][j]) + " ";
 				}
 				bw.write(line);
 				bw.newLine();
@@ -291,8 +311,30 @@ public class GomokuClient {
 			
 			//write hidden biases
 			line = "";
-			for(int i=0; i<hiddenNeurons; i++){
-				line = line + String.valueOf(hb[i]) + " ";
+			for(int i=0; i<leftHiddenNeurons; i++){
+				line = line + String.valueOf(lhb[i]) + " ";
+			}
+			bw.write(line);
+			bw.newLine();
+			
+			//skip line
+			bw.newLine();
+			
+			for(int i=0; i<leftHiddenNeurons; i++){
+				line = "";
+				for(int j=0; j<rightHiddenNeurons; j++){
+					line = line + String.valueOf(rhw[i][j]) + " ";
+				}
+				bw.write(line);
+				bw.newLine();
+			}
+			//skip line
+			bw.newLine();
+			
+			//write hidden biases
+			line = "";
+			for(int i=0; i<rightHiddenNeurons; i++){
+				line = line + String.valueOf(rhb[i]) + " ";
 			}
 			bw.write(line);
 			bw.newLine();
@@ -301,7 +343,7 @@ public class GomokuClient {
 			bw.newLine();
 			
 			//write output weights
-			for(int i=0; i<hiddenNeurons; i++){
+			for(int i=0; i<rightHiddenNeurons; i++){
 				line = "";
 				line = line + String.valueOf(ow[i][0]) + " ";
 				bw.write(line);
@@ -350,19 +392,20 @@ public class GomokuClient {
 			
 			//unpack game states from arraylist into double[][]
 			gstates = unpackGS();
-			//set reward for win/loss to 1/0
+			//set reward for win/loss to 1/-1
 			if(gs.equals("win")){ reward[0] = 1; }
-			else if(gs.equals("lose")){ reward[0] = 0; }
+			else if(gs.equals("lose")){ reward[0] = -1; }
 
 			System.out.print(gs + "   :::   ");
 			
 			//train on game sequence
 			net.train(gstates, reward);
+			//System.out.println("Error: " + (reward[0] - gstates[gstates.length-1][0]));
 		}
 		
 		//end timer
 		long endtime = System.currentTimeMillis();
-		System.out.println("training time for " + i + " games: " + TimeUnit.MILLISECONDS.toSeconds(endtime-starttime));
+		System.out.println("traing time for " + i + " games: " + TimeUnit.MILLISECONDS.toSeconds(endtime-starttime));
 		
 		//save weights
 		saveWeights(i + numGames);

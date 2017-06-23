@@ -1,0 +1,4 @@
+does not tracks players turn for current board state
+2 hidden layers
+1st - 50 hidden nodes
+2nd - 30 hidden nodes
